@@ -1,0 +1,3 @@
+build/*
+dist/*
+defillama2.egg-info/*

@@ -11,7 +11,7 @@ Download data from DefiLlama.com via its [APIs](https://defillama.com/docs/api).
 This package gets you tidy pandas data frames that are ready for downstream 
 analysis and modeling.
 
-![]('splash.png')
+![](https://github.com/coindataschool/defillama2/blob/main/splash.png)
 
 ### Installation
 

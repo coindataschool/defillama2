@@ -1,1 +1,1 @@
-from defillama2 import DefiLlama
+from .defillama2 import DefiLlama

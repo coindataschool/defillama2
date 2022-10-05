@@ -92,7 +92,7 @@ obj.get_pools_yields()
 obj.get_pool_hist_apy(pool_id)  # pool_id can be obtained from get_pools_yields()
 ```
 
-### Demos
+### Demo Code
 
 - [Get TVL and other fundamental data](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_tvl.ipynb).
 - [Get on-chain prices, including exotic tokens](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_coins.ipynb).

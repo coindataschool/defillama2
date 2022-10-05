@@ -11,6 +11,8 @@ Download data from DefiLlama.com via its [APIs](https://defillama.com/docs/api).
 This package gets you tidy pandas data frames that are ready for downstream 
 analysis and modeling.
 
+![]('splash.png')
+
 ### Installation
 
 `pip install defillama2`

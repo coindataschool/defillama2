@@ -311,6 +311,7 @@ class DefiLlama:
         df = df.groupby(['date', 'symbol'])['price'].mean()
         df = df.reset_index().pivot(index='date', columns='symbol', values='price')
         df.columns.name = None
+        df.index = pd.to_datetime(df.index)
         return df
 
     def get_closest_block(self, chain, timestamp):

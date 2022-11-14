@@ -2,11 +2,10 @@
 
 from setuptools import setup
 
-VERSION = '0.6'
+VERSION = '0.7'
 
 packages = ['defillama2']
-requires = ['requests>=2.28.1', 'pandas>=1.4.4', 'numpy>=1.22.4', 
-    'python-dateutil>=2.8.2']
+requires = ['requests>=2.28.1', 'pandas>=1.4.4', 'numpy>=1.22.4']
 
 with open('README.md', mode='r') as f:
     readme = f.read()
@@ -29,6 +28,7 @@ setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ]

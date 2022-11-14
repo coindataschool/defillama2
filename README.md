@@ -4,6 +4,7 @@
 [![Python 3.7](https://img.shields.io/badge/python-3.7-blue.svg)](https://www.python.org/downloads/release/python-370/)
 [![Python 3.8](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/downloads/release/python-380/)
 [![Python 3.9](https://img.shields.io/badge/python-3.9-blue.svg)](https://www.python.org/downloads/release/python-390/)
+[![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-310/)
 
 ## Python client for DeFiLlama API
 
@@ -63,8 +64,15 @@ obj.get_tokens_curr_prices(dd)
 # get their prices at a specific time '2022-09-15 13:25:43'
 obj.get_tokens_hist_snapshot_prices(dd, '2022-09-15 13:25:43')
 
-# get their historical daily close prices 
-obj.get_tokens_hist_prices(dd, start='2022-08-01', end='2022-09-01', type='close')
+# get their historical daily close/open prices 
+obj.get_daily_open_close(dd, start='2022-08-01', end='2022-09-01', kind='close')
+obj.get_daily_open_close(dd, start='2022-08-01', end='2022-09-01', kind='open')
+
+# get hourly prices
+obj.get_tokens_hist_prices(dd, start='2022-11-12', end='2022-11-14', freq='hour')
+
+# get daily open, high, low, close, mean, median, std of prices
+obj.get_tokens_hist_prices(dd, start='2022-11-12', end='2022-11-14', freq='daily')
 
 # get basic info on all stablecoins, along with their circulating amounts
 obj.get_stablecoins_circulating()          # don't give any input

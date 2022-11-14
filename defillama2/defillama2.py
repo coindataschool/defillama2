@@ -2,7 +2,6 @@ import requests
 import pandas as pd
 import numpy as np
 import datetime as dt
-from dateutil.relativedelta import relativedelta
 
 TVL_BASE_URL = "https://api.llama.fi"
 COINS_BASE_URL = "https://coins.llama.fi"
@@ -256,7 +255,7 @@ class DefiLlama:
         df = df.set_index('timestamp')
         return df 
 
-    def get_tokens_hist_prices(self, token_addrs_n_chains, start, end, type='close'):
+    def get_tokens_hist_prices(self, token_addrs_n_chains, start, end, kind='close'):
         """Get historical prices of tokens by contract address.
         Uses get_tokens_hist_snapshot_prices() to download iteratively since
         DeFiLlama currently doesn't offer an API for bulk download. 
@@ -273,7 +272,7 @@ class DefiLlama:
             Start date, for example, '2021-01-01'
         end : string
             End date, for example, '2022-01-01'
-        type : string
+        kind : string
             Price type, either 'close' (default) or 'open'. Does NOT support 
             other values at the moment.
 
@@ -283,11 +282,13 @@ class DefiLlama:
         """
         start = dt.datetime.strptime(start, '%Y-%m-%d')
         end   = dt.datetime.strptime(end, '%Y-%m-%d')
+        if (end.date() == dt.date.today()) and (kind == 'close'): 
+            end -= pd.Timedelta(days=1)
         dates = pd.date_range(start, end)
 
-        if type == 'close':
+        if kind == 'close':
             dttms = [date.replace(hour=23, minute=59, second=59) for date in dates] 
-        elif type == 'open':
+        elif kind == 'open':
             dttms = [date.replace(hour=0, minute=0, second=0) for date in dates] 
         else: 
             raise Exception("Only 'open' or 'close' are supported for `type`.")
@@ -300,14 +301,14 @@ class DefiLlama:
         #   - each column is a token
         #   - each value is a price (open or close)
         df = df.reset_index()
-        if type == 'close':
+        if kind == 'close':
             df['date'] = np.where(df.timestamp.dt.hour == 0, 
-                                  df.timestamp.dt.date - relativedelta(days=1), 
+                                  df.timestamp.dt.date - pd.Timedelta(days=1), 
                                   df.timestamp.dt.date)
-        if type == 'open':
+        if kind == 'open':
             df['date'] = np.where(df.timestamp.dt.hour == 0, 
                                   df.timestamp.dt.date, 
-                                  df.timestamp.dt.date + relativedelta(days=1))
+                                  df.timestamp.dt.date + pd.Timedelta(days=1))
         df = df.groupby(['date', 'symbol'])['price'].mean()
         df = df.reset_index().pivot(index='date', columns='symbol', values='price')
         df.columns.name = None

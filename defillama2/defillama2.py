@@ -8,6 +8,7 @@ COINS_BASE_URL = "https://coins.llama.fi"
 STABLECOINS_BASE_URL = "https://stablecoins.llama.fi"
 YIELDS_BASE_URL = "https://yields.llama.fi"
 ABI_DECODER_BASE_URL = "https://abi-decoder.llama.fi"
+VOLUMES_BASE_URL = "https://api.llama.fi"
 
 class DefiLlama:
     """ 
@@ -28,7 +29,7 @@ class DefiLlama:
         -------
         data frame
         """
-        df['date'] = df.date.apply(lambda x: dt.datetime.utcfromtimestamp(int(x)))
+        df['date'] = pd.to_datetime(df['date'], unit='s', utc=True)
         df = df.set_index('date').rename(columns={'totalLiquidityUSD': 'tvl'})
         return df
 
@@ -39,7 +40,8 @@ class DefiLlama:
         ----------
         api_name : string
             Which API to call. Possible values are 'TVL', 'COINS', 'STABLECOINS',
-            'YIELDS', and 'ABI_DECODER'. Each type has a different base url.
+            'YIELDS', 'VOLUMES', and 'ABI_DECODER'. Each type has a different 
+            base url.
         endpoint : string 
             Endpoint to be added to base URL.
         params : dictionary
@@ -57,6 +59,8 @@ class DefiLlama:
             url = STABLECOINS_BASE_URL + endpoint
         elif api_name == 'YIELDS':
             url = YIELDS_BASE_URL + endpoint 
+        elif api_name == 'VOLUMES':
+            url = VOLUMES_BASE_URL + endpoint
         else: 
             url = ABI_DECODER_BASE_URL + endpoint
         return self.session.request('GET', url, params=params, timeout=30).json()
@@ -200,9 +204,8 @@ class DefiLlama:
         ha = pd.DataFrame([item.split(':') for item in resp['coins'].keys()])
         ha.columns = ['chain', 'token_address']
         df = ha.join(pd.DataFrame([v for k, v in resp['coins'].items()]))
-        # convert epoch timestamp to human-readable datetime
-        df['timestamp'] = df.timestamp.apply(
-            lambda x: dt.datetime.utcfromtimestamp(int(x)))
+        # convert unix time (seconds) to utc datetime
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         return df
 
     def get_tokens_curr_prices(self, token_addrs_n_chains):
@@ -241,14 +244,14 @@ class DefiLlama:
             {'0xdF574c24545E5FfEcb9a659c229253D4111d87e1':'ethereum',
              'ethereum':'coingecko'}
         timestamp : string
-            Human-readable timestamp, for example, '2021-09-25 00:27:53'
+            Human-readable timestamp in utc, for example, '2021-09-25 00:27:53'
 
         Returns 
         -------
         data frame
         """
         ss = ','.join([v + ':' +k for k, v in token_addrs_n_chains.items()])
-        unix_ts = pd.to_datetime(timestamp).value / 1e9
+        unix_ts = pd.to_datetime(timestamp, utc=True).value / 1e9
         resp = self._get('COINS', f'/prices/historical/{unix_ts}/{ss}')
         df = self._tidy_frame_price(resp)
         df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain', 'token_address', 'decimals']]
@@ -301,7 +304,7 @@ class DefiLlama:
         df = df.groupby(['datetime', 'symbol'])['price'].mean() 
         df = df.reset_index().pivot(index='datetime', columns='symbol', values='price')
         df.columns.name = None
-        df.index = pd.to_datetime(df.index)
+        df.index = pd.to_datetime(df.index, utc=True)
         
         # derive daily prices if user requests them instead of hourly data
         if freq == 'daily':
@@ -383,7 +386,7 @@ class DefiLlama:
         df = df.groupby(['date', 'symbol'])['price'].mean()
         df = df.reset_index().pivot(index='date', columns='symbol', values='price')
         df.columns.name = None
-        df.index = pd.to_datetime(df.index)
+        df.index = pd.to_datetime(df.index, utc=True)
         return df
 
     def get_closest_block(self, chain, timestamp):
@@ -394,17 +397,16 @@ class DefiLlama:
         chain : string
             Name of the chain.
         timestamp : string
-            Human-readable timestamp, for example, '2021-09-25 00:27:53'.
+            Human-readable timestamp in utc, for example, '2021-09-25 00:27:53'.
 
         Returns 
         -------
         data frame
         """
-        unix_ts = pd.to_datetime(timestamp).value / 1e9
+        unix_ts = pd.to_datetime(timestamp, utc=True).value / 1e9
         resp = self._get('COINS', f'/block/{chain}/{unix_ts}')
         df = pd.DataFrame(resp, index=range(1))
-        df['timestamp'] = df.timestamp.apply(
-            lambda x: dt.datetime.utcfromtimestamp(int(x)))
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         return df
 
     def get_stablecoins_circulating(self, include_price=False):
@@ -448,7 +450,8 @@ class DefiLlama:
         -------
         dictionary where the keys are stablecoin symbols and values are data frames.
         """
-        resp = self._get('STABLECOINS', f'/stablecoins?includePrices={include_price}')
+        resp = self._get('STABLECOINS', 
+                         f'/stablecoins?includePrices={include_price}')
         lst = resp['peggedAssets']
         
         dict_of_dfs = dict()
@@ -477,9 +480,10 @@ class DefiLlama:
         -------
         data frame
         """
-        resp = self._get('STABLECOINS', f'/stablecoincharts/all?stablecoin={id}')
+        resp = self._get('STABLECOINS', 
+                         f'/stablecoincharts/all?stablecoin={id}')
         df = pd.concat([pd.DataFrame(d) for d in resp])        
-        df['date'] = df.date.apply(lambda x: dt.datetime.utcfromtimestamp(int(x)))
+        df['date'] = pd.to_datetime(df['date'], unit='s', utc=True)
         df = df.set_index('date')
         return df
 
@@ -499,9 +503,10 @@ class DefiLlama:
         -------
         data frame
         """
-        resp = self._get('STABLECOINS', f'/stablecoincharts/{chain}?stablecoin={id}')
+        resp = self._get('STABLECOINS', 
+                         f'/stablecoincharts/{chain}?stablecoin={id}')
         df = pd.concat([pd.DataFrame(d) for d in resp])        
-        df['date'] = df.date.apply(lambda x: dt.datetime.utcfromtimestamp(int(x)))
+        df['date'] = pd.to_datetime(df['date'], unit='s', utc=True)
         df = df.set_index('date')
         return df
 
@@ -529,7 +534,7 @@ class DefiLlama:
         resp = self._get('STABLECOINS', f'/stablecoinprices')
         df = pd.concat([pd.DataFrame(d) for d in resp])
         df = df.reset_index().rename(columns={'index':'stablecoin'})
-        df['date'] = df.date.apply(lambda x: dt.datetime.utcfromtimestamp(int(x)))
+        df['date'] = pd.to_datetime(df['date'], unit='s', utc=True)
         df = df.set_index('date')
         return df
 
@@ -563,8 +568,9 @@ class DefiLlama:
         """
         resp = self._get('YIELDS', f'/chart/{pool_id}')
         df = pd.DataFrame(resp['data'])
-        df['date'] = df.timestamp.apply(
-            lambda x: dt.datetime.strptime(x, '%Y-%m-%dT%H:%M:%S.%f%z').date())
+        df['date'] = pd.to_datetime(
+            df['timestamp'],
+            format='%Y-%m-%dT%H:%M:%S.%f%z').dt.normalize()
         df = df.drop(columns='timestamp')
         df['apyReward'] = df.apyReward.astype(float)
         df['apyBase'] = df.apyBase.astype(float)

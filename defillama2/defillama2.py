@@ -1,7 +1,8 @@
 import requests
 import pandas as pd
-import numpy as np
-import datetime as dt
+# import numpy as np
+# from datetime import datetime
+from urllib.parse import urlencode, quote
 
 TVL_BASE_URL = "https://api.llama.fi"
 COINS_BASE_URL = "https://coins.llama.fi"
@@ -200,13 +201,30 @@ class DefiLlama:
         return {chain: self._tidy_frame_tvl(pd.DataFrame(dd['chainTvls'][chain]['tvl'])) for chain in chains}
 
     def _tidy_frame_price(self, resp):
-        # convert json response to data frame
+        """ Convert json resp (dict) of snapshot prices to data frame. """
         ha = pd.DataFrame([item.split(':') for item in resp['coins'].keys()])
         ha.columns = ['chain', 'token_address']
         df = ha.join(pd.DataFrame([v for k, v in resp['coins'].items()]))
         # convert unix time (seconds) to utc datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         return df
+
+    def _tidy_frame_hist_batch_prices(resp):
+        """ Convert json resp (dict) of batch prices to data frame. """
+        # extract chains and token addrs and put in a data frame
+        dfl = pd.DataFrame([item.split(':') for item in resp['coins'].keys()])
+        dfl.columns = ['chain', 'token_address']
+        # extract prices for all tokens and all timestamps
+        lst = list(resp['coins'].values())
+        # add token symbol as a col to dfl to merge with dfr later
+        dfl['symbol'] = [elt['symbol'] for elt in lst]
+        # flatten the nested list of prices for all tokens and all timestamps 
+        # into a data frame
+        dfr = pd.json_normalize(lst, record_path='prices', meta='symbol')
+        # convert unix time (seconds) to utc datetime
+        dfr['timestamp'] = pd.to_datetime(dfr['timestamp'], unit='s', utc=True)
+        # merge on the symbol col
+        return pd.merge(dfl, dfr)
 
     def get_tokens_curr_prices(self, token_addrs_n_chains):
         """Get current prices of tokens by contract address.
@@ -227,8 +245,7 @@ class DefiLlama:
         ss = ','.join([v + ':' +k for k, v in token_addrs_n_chains.items()])
         resp = self._get('COINS', f'/prices/current/{ss}')
         df = self._tidy_frame_price(resp)
-        df = df.loc[:, ['timestamp', 'symbol', 'price', 'confidence', 'chain', 
-                        'token_address', 'decimals']]
+        df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain', 'decimals']]
         df = df.set_index('timestamp')
         return df
 
@@ -254,140 +271,35 @@ class DefiLlama:
         unix_ts = pd.to_datetime(timestamp, utc=True).value / 1e9
         resp = self._get('COINS', f'/prices/historical/{unix_ts}/{ss}')
         df = self._tidy_frame_price(resp)
-        df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain', 'token_address', 'decimals']]
+        df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain', 'decimals']]
         df = df.set_index('timestamp')
         return df 
 
-    def get_tokens_hist_prices(self, token_addrs_n_chains, start, end, freq='hourly'):
-        """Get historical hourly or daily prices of tokens by contract address.
-        Uses get_tokens_hist_snapshot_prices() to download iteratively since
-        DeFiLlama currently doesn't offer an API for bulk download. If you want 
-        to get daily open or close prices, use get_daily_open_close() instead 
-        since it's faster.
-        
+    def get_tokens_hist_batch_prices(self, chain_token_addr_timestamps):
+        """Get historical prices of tokens by chain at multiple timestamps.
+
         Parameters
         ----------
-        token_addrs_n_chains : dictionary
-            Each key is a token address; each value is a chain where the token 
-            address resides. If getting price from coingecko, use token name as 
-            key and 'coingecko' as value. For example, 
-            {'0xdF574c24545E5FfEcb9a659c229253D4111d87e1':'ethereum',
-             'ethereum':'coingecko'}
-        start : string
-            Start date, for example, '2021-01-01'
-        end : string
-            End date, for example, '2022-01-01'
-        freq : string
-            Data granularity, 'hourly' (default) or 'daily'. Does NOT support 
-            other values at the moment.
+        chain_token_addr_timestamps : dictionary
+            Each key is a chain:token_address; each value is a list of unix 
+            timestamps in seconds. For example, 
+            {"avax:0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": [1666876743, 1666862343],
+             "coingecko:ethereum": [1666869543, 1666862343]}
 
         Returns 
         -------
         data frame
         """
-        start = dt.datetime.strptime(start, '%Y-%m-%d')
-        end   = dt.datetime.strptime(end, '%Y-%m-%d')
-        timestamps = pd.date_range(start, end, freq='60min')
-        timestamps = timestamps[timestamps < dt.datetime.now()-pd.Timedelta(hours=4)] # give 4 hours buffer to ensure DeFiLlama data are available
-         
-        # download historical hourly data
-        df = pd.concat(self.get_tokens_hist_snapshot_prices(token_addrs_n_chains, dttm) for dttm in timestamps)
+        val = str(chain_token_addr_timestamps).replace("'", '"')
+        param = urlencode(dict(coins=val), quote_via=quote)
+        resp = self._get('COINS', 'batchHistorical/', params = param)
+        df = self._tidy_frame_hist_batch_price(resp)
+        df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain']]
+        df = df.set_index('timestamp')
+        return df 
 
-        # clean data so that the resulting frame has 
-        #   - each row is a datetime
-        #   - each column is a token
-        #   - each value is a price (open or close)
-        df = df.reset_index()
-        df['datetime'] = [elt.round(freq='H') for elt in df.timestamp]
-        # df[['timestamp', 'datetime']].head(10)
-        # there can be duplicates in the col `datetime`, so take their avg price
-        df = df.groupby(['datetime', 'symbol'])['price'].mean() 
-        df = df.reset_index().pivot(index='datetime', columns='symbol', values='price')
-        df.columns.name = None
-        df.index = pd.to_datetime(df.index, utc=True)
-        
-        # derive daily prices if user requests them instead of hourly data
-        if freq == 'daily':
-            symbols = df.columns
-            # calculate daily prices using hourly data
-            daily_open = df.asfreq('1d')
-            daily_low = df.resample('D').min()
-            daily_high = df.resample('D').max()
-            daily_close = daily_open.shift(-1)
-            daily_med = df.resample('D').median()
-            daily_avg = df.resample('D').mean()
-            daily_std = df.resample('D').std()
-            # assign header 
-            daily_open.columns = pd.MultiIndex.from_tuples([('open', symbol) for symbol in symbols])
-            daily_low.columns = pd.MultiIndex.from_tuples([('low', symbol) for symbol in symbols])
-            daily_high.columns = pd.MultiIndex.from_tuples([('high', symbol) for symbol in symbols])
-            daily_close.columns = pd.MultiIndex.from_tuples([('close', symbol) for symbol in symbols])
-            daily_med.columns = pd.MultiIndex.from_tuples([('median', symbol) for symbol in symbols])
-            daily_avg.columns = pd.MultiIndex.from_tuples([('mean', symbol) for symbol in symbols])
-            daily_std.columns = pd.MultiIndex.from_tuples([('std', symbol) for symbol in symbols])
-            # join together
-            df = pd.concat([daily_open, daily_low, daily_high, daily_close, daily_med, daily_avg, daily_std], axis=1)
-        return df
 
-    def get_daily_open_close(self, token_addrs_n_chains, start, end, kind='close'):
-        """Get historical daily open and close prices of tokens by contract address.
-        Uses get_tokens_hist_snapshot_prices() to download iteratively since
-        DeFiLlama currently doesn't offer an API for bulk download. 
-        
-        Parameters
-        ----------
-        token_addrs_n_chains : dictionary
-            Each key is a token address; each value is a chain where the token 
-            address resides. If getting price from coingecko, use token name as 
-            key and 'coingecko' as value. For example, 
-            {'0xdF574c24545E5FfEcb9a659c229253D4111d87e1':'ethereum',
-                'ethereum':'coingecko'}
-        start : string
-            Start date, for example, '2021-01-01'
-        end : string
-            End date, for example, '2022-01-01'
-        kind : string
-            Either 'close' (default, at 23:59:59) or 'open' (at 00:00:00). Does NOT 
-            support other values at the moment.
 
-        Returns 
-        -------
-        data frame
-        """
-        start = dt.datetime.strptime(start, '%Y-%m-%d')
-        end   = dt.datetime.strptime(end, '%Y-%m-%d')
-        if (end.date() == dt.date.today()) and (kind == 'close'): 
-            end -= pd.Timedelta(days=1)
-        dates = pd.date_range(start, end)
-
-        if kind == 'close':
-            dttms = [date.replace(hour=23, minute=59, second=59) for date in dates] 
-        elif kind == 'open':
-            dttms = [date.replace(hour=0, minute=0, second=0) for date in dates] 
-        else: 
-            raise Exception("Only 'open' or 'close' are supported.")
-
-        # download historical snapshots one by one    
-        df = pd.concat(self.get_tokens_hist_snapshot_prices(token_addrs_n_chains, dttm) for dttm in dttms)
-
-        # clean data so that the resulting frame has 
-        #   - each row is a date
-        #   - each column is a token
-        #   - each value is a price (open or close)
-        df = df.reset_index()
-        if kind == 'close':
-            df['date'] = np.where(df.timestamp.dt.hour == 0, 
-                                  df.timestamp.dt.date - pd.Timedelta(days=1), 
-                                  df.timestamp.dt.date)
-        if kind == 'open':
-            df['date'] = np.where(df.timestamp.dt.hour == 0, 
-                                  df.timestamp.dt.date, 
-                                  df.timestamp.dt.date + pd.Timedelta(days=1))
-        df = df.groupby(['date', 'symbol'])['price'].mean()
-        df = df.reset_index().pivot(index='date', columns='symbol', values='price')
-        df.columns.name = None
-        df.index = pd.to_datetime(df.index, utc=True)
-        return df
 
     def get_closest_block(self, chain, timestamp):
         """Get the closest block to a timestamp.
@@ -576,3 +488,69 @@ class DefiLlama:
         df['apyBase'] = df.apyBase.astype(float)
         df = df.groupby('date').mean()
         return df
+
+    def get_dexes_volumes(self, data_type='dailyVolume'):
+        """Get transaction volumes of all dexes, 
+        including 'Dexes', 'Derivatives', and 'Yield' protocols.
+
+        Parameters
+        ----------
+        data_type : string
+            'dailyVolume' or 'totalVolume'. It seems 'totalVolume' isn't 
+            used on DeFiLlama's website. So use 'dailyVolume' for most 
+            cases.
+        
+        Returns 
+        -------
+        dictionary of data frames: 
+            - volume_overall
+            - volume_by_dex 
+            - volume_by_dex_by_chain
+            - daily_volume
+            - daily_volume_by_dex
+        """
+        resp = self._get(
+            'VOLUMES', f'/overview/dexs?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=false&dataType={data_type}')
+
+        # overall volume across all dexes and chains
+        volume_overall = pd.DataFrame(
+            dict(total24h = resp['total24h'], 
+                total7d = resp['total7d'],
+                change_1d = resp['change_1d'],
+                change_7d = resp['change_7d'],
+                change_1m = resp['change_1m'],
+                change_7dover7d = resp['change_7dover7d']),
+            index=range(1))
+
+        # volume by dex
+        df = pd.DataFrame(resp['protocols'])\
+            .query("latestFetchIsOk == True & disabled == False")
+        ha = df['breakdown24h']
+        volume_by_dex = df.drop(columns=[
+            'latestFetchIsOk', 'disabled', 'module', 'logo', 'protocolType', 'displayName', 'methodology', 'methodologyURL', 'breakdown24h', 'protocolsStats'])
+
+        # volume by dex by chain
+        volume_by_dex_by_chain = \
+            pd.concat([pd.DataFrame(ha.iloc[i]) for i in range(len(ha))])\
+            .stack().reset_index()
+        volume_by_dex_by_chain.columns = ['protocol', 'chain', 'total24h']
+
+        # daily volume of all dexes
+        daily_volume = pd.DataFrame(resp['totalDataChart'])
+        daily_volume.columns = ['date', 'volume']
+        daily_volume['date'] = pd.to_datetime(
+            daily_volume['date'], unit='s', utc=True)
+        
+        # daily volume by dex
+        daily_volume_by_dex = pd.DataFrame(resp['totalDataChartBreakdown'])
+        daily_volume_by_dex.columns = ['date', 'dex_vol_dict']
+        daily_volume_by_dex['date'] = \
+            pd.to_datetime(daily_volume_by_dex['date'], unit='s', utc=True)
+        daily_volume_by_dex = daily_volume_by_dex[['date']]\
+            .join(pd.DataFrame(daily_volume_by_dex['dex_vol_dict'].tolist()))
+
+        return {'volume_overall': volume_overall, 
+                'volume_by_dex': volume_by_dex, 
+                'volume_by_dex_by_chain': volume_by_dex_by_chain, 
+                'daily_volume':daily_volume, 
+                'daily_volume_by_dex': daily_volume_by_dex}

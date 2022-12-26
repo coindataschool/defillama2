@@ -1,6 +1,6 @@
 import requests
 import pandas as pd
-# import numpy as np
+import numpy as np
 # from datetime import datetime
 from urllib.parse import urlencode, quote
 
@@ -209,7 +209,7 @@ class DefiLlama:
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         return df
 
-    def _tidy_frame_hist_batch_prices(resp):
+    def _tidy_frame_hist_batch_prices(self, resp):
         """ Convert json resp (dict) of batch prices to data frame. """
         # extract chains and token addrs and put in a data frame
         dfl = pd.DataFrame([item.split(':') for item in resp['coins'].keys()])
@@ -292,13 +292,73 @@ class DefiLlama:
         """
         val = str(chain_token_addr_timestamps).replace("'", '"')
         param = urlencode(dict(coins=val), quote_via=quote)
-        resp = self._get('COINS', 'batchHistorical/', params = param)
-        df = self._tidy_frame_hist_batch_price(resp)
+        resp = self._get('COINS', '/batchHistorical/', params = param)
+        df = self._tidy_frame_hist_batch_prices(resp)
         df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain']]
         df = df.set_index('timestamp')
         return df 
 
+    def get_daily_open_close(self, token_addrs_n_chains, start, end, kind='close'):
+        """Get historical daily open and close prices of tokens by contract address.
+        
+        Parameters
+        ----------
+        token_addrs_n_chains : dictionary
+            Each key is a token address; each value is a chain where the token 
+            address resides. If getting price from coingecko, use token name as 
+            key and 'coingecko' as value. For example, 
+            {'0xdF574c24545E5FfEcb9a659c229253D4111d87e1':'ethereum',
+                'ethereum':'coingecko'}
+        start : string
+            Start date, for example, '2021-01-01'
+        end : string
+            End date, for example, '2022-01-01'
+        kind : string
+            Either 'close' (default, at 23:59:59) or 'open' (at 00:00:00). Does NOT 
+            support other values at the moment.
 
+        Returns 
+        -------
+        data frame
+        """
+        start = pd.to_datetime(start, format='%Y-%m-%d')
+        end   = pd.to_datetime(end, format='%Y-%m-%d')
+        if (end.date() == pd.to_datetime('today').date()) and (kind == 'close'): 
+            end -= pd.Timedelta(days=1)
+        dates = pd.date_range(start, end)
+
+        # get unix seconds for each date 
+        if kind == 'close':
+            dttms = [dt.replace(hour=23, minute=59, second=59).timestamp() for dt in dates] 
+        elif kind == 'open':
+            dttms = [dt.replace(hour=0, minute=0, second=0).timestamp() for dt in dates] 
+        else: 
+            raise Exception("Only 'open' or 'close' are supported.")
+        
+        # make input dict for getting historical batch prices
+        dd = {f'{v}:{k}':dttms for k, v in token_addrs_n_chains.items()}
+        
+        # download historical prices at these time points
+        df = self.get_tokens_hist_batch_prices(dd)
+        
+        # clean data so that the resulting frame has 
+        #   - each row is a date
+        #   - each column is a token
+        #   - each value is a price (open or close)
+        df = df.reset_index()
+        if kind == 'close':
+            df['date'] = np.where(df.timestamp.dt.hour == 0, 
+                                    df.timestamp.dt.date - pd.Timedelta(days=1), 
+                                    df.timestamp.dt.date)
+        if kind == 'open':
+            df['date'] = np.where(df.timestamp.dt.hour == 0, 
+                                    df.timestamp.dt.date, 
+                                    df.timestamp.dt.date + pd.Timedelta(days=1))
+        df = df.groupby(['date', 'symbol'])['price'].mean()
+        df = df.reset_index().pivot(index='date', columns='symbol', values='price')
+        df.index = pd.to_datetime(df.index, utc=True)
+
+        return df
 
 
     def get_closest_block(self, chain, timestamp):

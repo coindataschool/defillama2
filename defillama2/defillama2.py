@@ -651,8 +651,11 @@ class DefiLlama:
             - daily_volume
             - daily_volume_by_dex
         """
-        resp = self._get(
-            'VOLUMES', f'/overview/dexs?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=false&dataType={data_type}')
+        dd = dict(excludeTotalDataChart='false',
+                  excludeTotalDataChartBreakdown='false',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', '/overview/dexs?', params = param)
 
         # overall volume across all dexes and chains
         volume_overall = pd.DataFrame(

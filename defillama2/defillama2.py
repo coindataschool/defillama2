@@ -478,6 +478,11 @@ class DefiLlama:
             # join together
             df = pd.concat([daily_open, daily_low, daily_high, daily_close, 
                             daily_med, daily_avg, daily_std], axis=1)
+            # change index from DateTime to Date
+            df.index = pd.to_datetime(df.index, utc=True).date # date is an attribute
+            # here, and calling date() as a method throws error. 
+            df.index.name='date'
+            
         return df
 
     def get_closest_block(self, chain, timestamp):

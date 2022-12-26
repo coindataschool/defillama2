@@ -1,7 +1,7 @@
 import requests
 import pandas as pd
 import numpy as np
-# from datetime import datetime
+import time
 from urllib.parse import urlencode, quote
 
 TVL_BASE_URL = "https://api.llama.fi"
@@ -283,7 +283,8 @@ class DefiLlama:
         chain_token_addr_timestamps : dictionary
             Each key is a chain:token_address; each value is a list of unix 
             timestamps in seconds. For example, 
-            {"avax:0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": [1666876743, 1666862343],
+            {"avax:0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": 
+                [1666876743, 1666862343],
              "coingecko:ethereum": [1666869543, 1666862343]}
 
         Returns 
@@ -299,7 +300,8 @@ class DefiLlama:
         return df 
 
     def get_daily_open_close(self, token_addrs_n_chains, start, end, kind='close'):
-        """Get historical daily open and close prices of tokens by contract address.
+        """Get historical daily open and close prices of tokens by contract 
+        address. Data on both the starting and end dates are included. 
         
         Parameters
         ----------
@@ -314,34 +316,50 @@ class DefiLlama:
         end : string
             End date, for example, '2022-01-01'
         kind : string
-            Either 'close' (default, at 23:59:59) or 'open' (at 00:00:00). Does NOT 
-            support other values at the moment.
+            Either 'close' (default, at 23:59:59) or 'open' (at 00:00:00). Does 
+            NOT support other values at the moment.
 
         Returns 
         -------
         data frame
         """
         start = pd.to_datetime(start, format='%Y-%m-%d', utc=True)
-        end   = pd.to_datetime(end, format='%Y-%m-%d', utc=True)
+        end   = pd.to_datetime(end, format='%Y-%m-%d', utc=True) 
         today = pd.to_datetime('today', utc=True).date()
         if (end.date() == today) and (kind == 'close'): 
             end -= pd.Timedelta(days=1)
-        dates = pd.date_range(start, end)
+        dates = pd.date_range(start, end) # , inclusive='left'
 
         # get unix seconds for each date 
         if kind == 'close':
-            dttms = [dt.replace(hour=23, minute=59, second=59).timestamp() for dt in dates] 
+            dttms = [dt.replace(hour=23, minute=59, second=59).timestamp() 
+                     for dt in dates]
         elif kind == 'open':
-            dttms = [dt.replace(hour=0, minute=0, second=0).timestamp() for dt in dates] 
+            dttms = [dt.replace(hour=0, minute=0, second=0).timestamp() 
+                     for dt in dates]
         else: 
             raise Exception("Only 'open' or 'close' are supported.")
-        
-        # make input dict for getting historical batch prices
-        dd = {f'{v}:{k}':dttms for k, v in token_addrs_n_chains.items()}
-        
-        # download historical prices at these time points
-        df = self.get_tokens_hist_batch_prices(dd)
-        
+
+        # necessary due to api limit
+        chunk_size = 30 # 30 days
+        if len(dttms) <= chunk_size:
+            # make input dict for getting historical batch prices
+            dd = {f'{v}:{k}':dttms for k, v in token_addrs_n_chains.items()}            
+            df = self.get_tokens_hist_batch_prices(dd)
+        else: # break into batches and iterate due to API call limit
+            nchunks = int(np.ceil(len(dttms) / chunk_size))
+            lst = list()
+            for i in range(nchunks):
+                # i = 11
+                # make input dict for getting historical batch prices
+                dd = {f'{v}:{k}':dttms[i*chunk_size:(i+1)*chunk_size]
+                      for k, v in token_addrs_n_chains.items()}
+                # download historical prices at these time points
+                lst.append(self.get_tokens_hist_batch_prices(dd))
+                time.sleep(0.1)
+                # print(len(lst))
+            df = pd.concat(lst, axis=0)
+
         # clean data so that the resulting frame has 
         #   - each row is a date
         #   - each column is a token
@@ -349,20 +367,24 @@ class DefiLlama:
         df = df.reset_index()
         if kind == 'close':
             df['date'] = np.where(df.timestamp.dt.hour == 0, 
-                                    df.timestamp.dt.date - pd.Timedelta(days=1), 
-                                    df.timestamp.dt.date)
+                                  df.timestamp.dt.date - pd.Timedelta(days=1), 
+                                  df.timestamp.dt.date)
         if kind == 'open':
             df['date'] = np.where(df.timestamp.dt.hour == 0, 
-                                    df.timestamp.dt.date, 
-                                    df.timestamp.dt.date + pd.Timedelta(days=1))
+                                  df.timestamp.dt.date, 
+                                  df.timestamp.dt.date + pd.Timedelta(days=1))
         df = df.groupby(['date', 'symbol'])['price'].mean()
         df = df.reset_index().pivot(index='date', columns='symbol', values='price')
-        df.index = pd.to_datetime(df.index, utc=True)
+        df.columns.name = None
+        df.index = pd.to_datetime(df.index, utc=True).date # date is an attribute
+        # here, and calling date() as a method throws error. 
+        df.index.name='date'
         return df
 
     def get_tokens_hist_prices(self, token_addrs_n_chains, start, end, freq='hourly'):
-        """Get historical hourly or daily prices of tokens by contract address.
-        If you only want daily open/close prices, use get_daily_open_close().
+        """Get historical hourly or daily prices of tokens by contract address. 
+        Data on both the starting and end dates are included. If you only want 
+        daily open/close prices, use get_daily_open_close().
         
         Parameters
         ----------
@@ -373,9 +395,9 @@ class DefiLlama:
             {'0xdF574c24545E5FfEcb9a659c229253D4111d87e1':'ethereum', 
              'ethereum':'coingecko'}
         start : string
-            Start date, for example, '2021-01-01'
+            Start date, for example, '2022-11-01'
         end : string
-            End date, for example, '2022-01-01'
+            End date, for example, '2022-11-30'. 
         freq : string
             Data granularity, 'hourly' (default) or 'daily'. Does NOT support 
             other values at the moment.
@@ -385,19 +407,33 @@ class DefiLlama:
         data frame
         """
         start = pd.to_datetime(start, format='%Y-%m-%d', utc=True)
-        end   = pd.to_datetime(end, format='%Y-%m-%d', utc=True)
+        end   = pd.to_datetime(end, format='%Y-%m-%d', utc=True) + pd.Timedelta(days=1)
         now   = pd.to_datetime('now', utc=True)
-        dttms = pd.date_range(start, end, freq='60min')
+        dttms = pd.date_range(start, end, inclusive='left', freq='60min')
         # convert to unix seconds and 
         # give 4 hours buffer to ensure DeFiLlama data are available
         dttms = [dttm.timestamp() for dttm in dttms 
                  if dttm < now-pd.Timedelta(hours=4)] 
-
-        # make input dict for getting historical batch prices
-        dd = {f'{v}:{k}':dttms for k, v in token_addrs_n_chains.items()}
         
-        # download historical prices at these time points
-        df = self.get_tokens_hist_batch_prices(dd)
+        # necessary due to api limit
+        chunk_size = 24*2 # 2 days
+        if len(dttms) <= chunk_size:
+            # make input dict for getting historical batch prices
+            dd = {f'{v}:{k}':dttms for k, v in token_addrs_n_chains.items()}
+            df = self.get_tokens_hist_batch_prices(dd)
+        else: # break into batches and iterate due to API call limit
+            nchunks = int(np.ceil(len(dttms) / chunk_size))
+            lst = list()
+            for i in range(nchunks):
+                # i = 11
+                # make input dict for getting historical batch prices
+                dd = {f'{v}:{k}':dttms[i*chunk_size:(i+1)*chunk_size]
+                      for k, v in token_addrs_n_chains.items()}
+                # download historical prices at these time points
+                lst.append(self.get_tokens_hist_batch_prices(dd))
+                time.sleep(0.1)
+                # print(len(lst))
+            df = pd.concat(lst, axis=0)
         
         # clean data so that the resulting frame has 
         #   - each row is a datetime
@@ -410,6 +446,7 @@ class DefiLlama:
         df = df.groupby(['datetime', 'symbol']).agg({'price':'mean'})
         df = df.reset_index()\
             .pivot(index='datetime', columns='symbol', values='price')
+        df.columns.name = None
         df.index = pd.to_datetime(df.index, utc=True)
         
         # derive daily prices if user requests them instead of hourly data
@@ -672,7 +709,9 @@ class DefiLlama:
             .query("latestFetchIsOk == True & disabled == False")
         ha = df['breakdown24h']
         volume_by_dex = df.drop(columns=[
-            'latestFetchIsOk', 'disabled', 'module', 'logo', 'protocolType', 'displayName', 'methodology', 'methodologyURL', 'breakdown24h', 'protocolsStats'])
+            'latestFetchIsOk', 'disabled', 'module', 'logo', 'protocolType', 
+            'displayName', 'methodology', 'methodologyURL', 'breakdown24h', 
+            'protocolsStats'])
 
         # volume by dex by chain
         volume_by_dex_by_chain = \

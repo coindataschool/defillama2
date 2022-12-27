@@ -19,21 +19,6 @@ class DefiLlama:
     def __init__(self):
         self.session = requests.Session()
 
-    def _tidy_frame_tvl(self, df):
-        """Set `date` of input data frame as index and shorten TVL column name.
-        
-        Parameters
-        ----------
-        df : data frame 
-            Must contains two columns: `date` and 'totalLiquidityUSD'.
-        Returns 
-        -------
-        data frame
-        """
-        df['date'] = pd.to_datetime(df['date'], unit='s', utc=True)
-        df = df.set_index('date').rename(columns={'totalLiquidityUSD': 'tvl'})
-        return df
-
     def _get(self, api_name, endpoint, params=None):
         """Send 'GET' request.
 
@@ -65,6 +50,23 @@ class DefiLlama:
         else: 
             url = ABI_DECODER_BASE_URL + endpoint
         return self.session.request('GET', url, params=params, timeout=30).json()
+
+    # --- TVL --- #
+    
+    def _tidy_frame_tvl(self, df):
+        """Set `date` of input data frame as index and shorten TVL column name.
+        
+        Parameters
+        ----------
+        df : data frame 
+            Must contains two columns: `date` and 'totalLiquidityUSD'.
+        Returns 
+        -------
+        data frame
+        """
+        df['date'] = pd.to_datetime(df['date'], unit='s', utc=True)
+        df = df.set_index('date').rename(columns={'totalLiquidityUSD': 'tvl'})
+        return df
 
     def get_protocol_curr_tvl(self, protocol):
         """Get current TVL of a protocol.
@@ -200,12 +202,14 @@ class DefiLlama:
         chains = list(d1.keys())
         return {chain: self._tidy_frame_tvl(pd.DataFrame(dd['chainTvls'][chain]['tvl'])) for chain in chains}
 
+    # --- coins --- #
+    
     def _tidy_frame_price(self, resp):
         """ Convert json resp (dict) of snapshot prices to data frame. """
         ha = pd.DataFrame([item.split(':') for item in resp['coins'].keys()])
         ha.columns = ['chain', 'token_address']
-        df = ha.join(pd.DataFrame([v for k, v in resp['coins'].items()]))
-        # convert unix time (seconds) to utc datetime
+        df = ha.join(pd.DataFrame(resp['coins'].values()))
+        # convert unix time (seconds) to utc datetime and use it as index
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         return df
 
@@ -245,9 +249,30 @@ class DefiLlama:
         ss = ','.join([v + ':' +k for k, v in token_addrs_n_chains.items()])
         resp = self._get('COINS', f'/prices/current/{ss}')
         df = self._tidy_frame_price(resp)
-        df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain', 'decimals']]
         df = df.set_index('timestamp')
-        return df
+        return df.loc[:, ['symbol','price','chain','decimals','token_address']] 
+
+    def get_tokens_earliest_prices(self, token_addrs_n_chains):
+        """Get earliest timestamp price record for tokens.
+
+        Parameters
+        ----------
+        token_addrs_n_chains : dictionary
+            Each key is a token address; each value is a chain where the token 
+            address resides. If getting price from coingecko, use token name as 
+            key and 'coingecko' as value. For example, 
+            {'0xdF574c24545E5FfEcb9a659c229253D4111d87e1':'ethereum',
+             'ethereum':'coingecko'}
+
+        Returns 
+        -------
+        data frame
+        """
+        ss = ','.join([v + ':' +k for k, v in token_addrs_n_chains.items()])
+        resp = self._get('COINS', f'/prices/first/{ss}')
+        df = self._tidy_frame_price(resp)
+        df = df.rename(columns={'timestamp':'earliest_timestamp'})
+        return df.loc[:, ['symbol','chain','earliest_timestamp','price','token_address']]
 
     def get_tokens_hist_snapshot_prices(self, token_addrs_n_chains, timestamp):
         """Get historical snapshot prices of tokens by contract address.
@@ -271,10 +296,9 @@ class DefiLlama:
         unix_ts = pd.to_datetime(timestamp, utc=True).value / 1e9
         resp = self._get('COINS', f'/prices/historical/{unix_ts}/{ss}')
         df = self._tidy_frame_price(resp)
-        df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain', 'decimals']]
         df = df.set_index('timestamp')
-        return df 
-
+        return df.loc[:, ['symbol','price','chain','token_address']]
+        
     def get_tokens_hist_batch_prices(self, chain_token_addr_timestamps):
         """Get historical prices of tokens by chain at multiple timestamps.
 
@@ -295,9 +319,8 @@ class DefiLlama:
         param = urlencode(dict(coins=val), quote_via=quote)
         resp = self._get('COINS', '/batchHistorical/', params = param)
         df = self._tidy_frame_hist_batch_prices(resp)
-        df = df.loc[:, ['timestamp', 'symbol', 'price', 'chain']]
         df = df.set_index('timestamp')
-        return df 
+        return df.loc[:, ['symbol','price','chain','token_address']] 
 
     def get_daily_open_close(self, token_addrs_n_chains, start, end, kind='close'):
         """Get historical daily open and close prices of tokens by contract 
@@ -482,9 +505,12 @@ class DefiLlama:
             df.index = pd.to_datetime(df.index, utc=True).date # date is an attribute
             # here, and calling date() as a method throws error. 
             df.index.name='date'
-            
         return df
-
+    
+    # TODO:
+    # /chart/{coins}
+    # /percentage/{coins}
+    
     def get_closest_block(self, chain, timestamp):
         """Get the closest block to a timestamp.
 
@@ -504,7 +530,9 @@ class DefiLlama:
         df = pd.DataFrame(resp, index=range(1))
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         return df
-
+    
+    # --- stablecoins --- #
+    
     def get_stablecoins_circulating(self, include_price=False):
         """Get the circulating amounts for all stablecoins.
 
@@ -634,6 +662,12 @@ class DefiLlama:
         df = df.set_index('date')
         return df
 
+    # TODO: 
+    # /stablecoin/{asset} https://stablecoins.llama.fi/stablecoin/1
+    
+
+    # --- yields --- #
+    
     def get_pools_yields(self):
         """Get the latest data for all pools, including enriched info such as 
         predictions.
@@ -673,6 +707,8 @@ class DefiLlama:
         df = df.groupby('date').mean()
         return df
 
+    # --- volumes --- #
+    
     def get_dexes_volumes(self, data_type='dailyVolume'):
         """Get transaction volumes of all dexes, 
         including 'Dexes', 'Derivatives', and 'Yield' protocols.
@@ -743,3 +779,8 @@ class DefiLlama:
                 'volume_by_dex_by_chain': volume_by_dex_by_chain, 
                 'daily_volume':daily_volume, 
                 'daily_volume_by_dex': daily_volume_by_dex}
+        
+    # --- fees and revenue --- #
+    
+    
+    # --- bridges --- #

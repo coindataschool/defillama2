@@ -507,8 +507,52 @@ class DefiLlama:
             df.index.name='date'
         return df
     
+    def get_prices_at_regular_intervals(self, token_addrs_n_chains, end,
+                                        end_format=None, span=30, period='4h'):
+        """Get prices of tokens before user-supplied end time at regular intervals.
+
+        Parameters
+        ----------
+        token_addrs_n_chains : dictionary
+            Each key is a token address; each value is a chain where the token 
+            address resides. If getting price from coingecko, use token name as 
+            key and 'coingecko' as value. For example, 
+            {'0xdF574c24545E5FfEcb9a659c229253D4111d87e1':'ethereum',
+             'ethereum':'coingecko'}
+        end : str
+            Datetime string. For example, '2022-12-01' or '2012-12-01 08:15:00'
+        end_format : str
+            Datetime string format for parsing `end`. For example, 
+            '%Y-%m-%d' or '%Y-%m-%d %H:%M:%S'.
+        span : int
+            Number of price points, defaults to 30.
+        period : str
+            Duration between data points, defaults to '4h'. Can use regular 
+            chart candle notion like '4h' etc where: W = week, D = day, 
+            H = hour, M = minute (not case sensitive).
+            
+        Returns 
+        -------
+        data frame
+        """
+        ss = ','.join([v + ':' +k for k, v in token_addrs_n_chains.items()])
+        unix_sec = pd.to_datetime(end, format=end_format, utc=True).timestamp()
+        param = dict(end=unix_sec, period=period, span=span)
+        param = urlencode(param, quote_via=quote)
+        base_url = "https://coins.llama.fi"
+        url = base_url + f'/chart/{ss}?'
+        resp = requests.Session()\
+            .request('GET', url, params=param, timeout=30)\
+            .json()
+        df = self._tidy_frame_hist_batch_prices(resp)
+        df = df.groupby(['timestamp', 'symbol'])\
+                .agg({'price':'mean'})\
+                .reset_index()\
+                .pivot(index='timestamp', columns='symbol', values='price')
+        df.columns.name = None
+        return df
+    
     # TODO:
-    # /chart/{coins}
     # /percentage/{coins}
     
     def get_closest_block(self, chain, timestamp):
@@ -525,8 +569,8 @@ class DefiLlama:
         -------
         data frame
         """
-        unix_ts = pd.to_datetime(timestamp, utc=True).value / 1e9
-        resp = self._get('COINS', f'/block/{chain}/{unix_ts}')
+        unix_sec = pd.to_datetime(timestamp, utc=True).timestamp()
+        resp = self._get('COINS', f'/block/{chain}/{unix_sec}')
         df = pd.DataFrame(resp, index=range(1))
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         return df

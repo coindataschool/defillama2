@@ -25,9 +25,8 @@ class DefiLlama:
         Parameters
         ----------
         api_name : string
-            Which API to call. Possible values are 'TVL', 'COINS', 'STABLECOINS',
-            'YIELDS', 'VOLUMES', and 'ABI_DECODER'. Each type has a different 
-            base url.
+            Possible values are 'TVL', 'COINS', 'STABLECOINS', 'YIELDS', 
+            'VOLUMES', and 'ABI_DECODER'. Each has a different base url.
         endpoint : string 
             Endpoint to be added to base URL.
         params : dictionary
@@ -49,7 +48,7 @@ class DefiLlama:
             url = VOLUMES_BASE_URL + endpoint
         else: 
             url = ABI_DECODER_BASE_URL + endpoint
-        return self.session.request('GET', url, params=params, timeout=30).json()
+        return self.session.request('GET', url,params=params,timeout=30).json()
 
     # --- TVL --- #
     
@@ -200,7 +199,8 @@ class DefiLlama:
         if 'staking' in d1:
             d1.pop('staking')
         chains = list(d1.keys())
-        return {chain: self._tidy_frame_tvl(pd.DataFrame(dd['chainTvls'][chain]['tvl'])) for chain in chains}
+        return {chain: self._tidy_frame_tvl(
+            pd.DataFrame(dd['chainTvls'][chain]['tvl'])) for chain in chains}
 
     # --- coins --- #
     
@@ -272,7 +272,8 @@ class DefiLlama:
         resp = self._get('COINS', f'/prices/first/{ss}')
         df = self._tidy_frame_price(resp)
         df = df.rename(columns={'timestamp':'earliest_timestamp'})
-        return df.loc[:, ['symbol','chain','earliest_timestamp','price','token_address']]
+        return df.loc[:, ['symbol','chain','earliest_timestamp',
+                          'price','token_address']]
 
     def get_tokens_hist_snapshot_prices(self, token_addrs_n_chains, timestamp):
         """Get historical snapshot prices of tokens by contract address.
@@ -502,8 +503,8 @@ class DefiLlama:
             df = pd.concat([daily_open, daily_low, daily_high, daily_close, 
                             daily_med, daily_avg, daily_std], axis=1)
             # change index from DateTime to Date
-            df.index = pd.to_datetime(df.index, utc=True).date # date is an attribute
-            # here, and calling date() as a method throws error. 
+            df.index = pd.to_datetime(df.index, utc=True).date # date is an 
+            # attribute here, and calling the date() method throws error. 
             df.index.name='date'
         return df
     
@@ -552,8 +553,8 @@ class DefiLlama:
         df.columns.name = None
         return df
     
-    # TODO:
-    # /percentage/{coins}
+    # no need to implement /percentage/{coins} cuz users can calculate 
+    # % change using prices downloaded via the other functions.
     
     def get_closest_block(self, chain, timestamp):
         """Get the closest block to a timestamp.
@@ -591,7 +592,8 @@ class DefiLlama:
         -------
         data frame
         """
-        resp = self._get('STABLECOINS', f'/stablecoins?includePrices={include_price}')
+        resp = self._get('STABLECOINS', 
+                         f'/stablecoins?includePrices={include_price}')
         lst = resp['peggedAssets']
         
         res = []
@@ -630,7 +632,9 @@ class DefiLlama:
             for k, v in d1.items():
                 da = pd.DataFrame(v)
                 da['chain'] = k
-                da = da.reset_index().rename(columns={'index':'type'}).set_index('chain')
+                da = da.reset_index()\
+                       .rename(columns={'index':'type'})\
+                       .set_index('chain')
                 haha.append(da)
             dict_of_dfs[d0['symbol']] = pd.concat(haha)
         return dict_of_dfs
@@ -706,9 +710,8 @@ class DefiLlama:
         df = df.set_index('date')
         return df
 
-    # TODO: 
-    # /stablecoin/{asset} https://stablecoins.llama.fi/stablecoin/1
-    
+    # no need to implement /stablecoin/{asset} cuz it just returns all data in 
+    # a deeply nested list that other api endpoints return separately.
 
     # --- yields --- #
     
@@ -752,43 +755,18 @@ class DefiLlama:
         return df
 
     # --- volumes --- #
-    
-    def get_dexes_volumes(self, data_type='dailyVolume'):
-        """Get transaction volumes of all dexes, 
-        including 'Dexes', 'Derivatives', and 'Yield' protocols.
 
-        Parameters
-        ----------
-        data_type : string
-            'dailyVolume' or 'totalVolume'. It seems 'totalVolume' isn't 
-            used on DeFiLlama's website. So use 'dailyVolume' for most 
-            cases.
-        
-        Returns 
-        -------
-        dictionary of data frames: 
-            - volume_overall
-            - volume_by_dex 
-            - volume_by_dex_by_chain
-            - daily_volume
-            - daily_volume_by_dex
-        """
-        dd = dict(excludeTotalDataChart='false',
-                  excludeTotalDataChartBreakdown='false',
-                  dataType=data_type)
-        param = urlencode(dd, quote_via=quote)
-        resp = self._get('VOLUMES', '/overview/dexs?', params = param)
-
+    def _tidy_frame_volume(self, resp):
+        """ Convert json resp (dict) of dexes volumes to dict of data frames. """
         # overall volume across all dexes and chains
         volume_overall = pd.DataFrame(
             dict(total24h = resp['total24h'], 
-                total7d = resp['total7d'],
-                change_1d = resp['change_1d'],
-                change_7d = resp['change_7d'],
-                change_1m = resp['change_1m'],
-                change_7dover7d = resp['change_7dover7d']),
+                 total7d = resp['total7d'],
+                 change_1d = resp['change_1d'],
+                 change_7d = resp['change_7d'],
+                 change_1m = resp['change_1m'],
+                 change_7dover7d = resp['change_7dover7d']),
             index=range(1))
-
         # volume by dex
         df = pd.DataFrame(resp['protocols'])\
             .query("latestFetchIsOk == True & disabled == False")
@@ -797,33 +775,197 @@ class DefiLlama:
             'latestFetchIsOk', 'disabled', 'module', 'logo', 'protocolType', 
             'displayName', 'methodology', 'methodologyURL', 'breakdown24h', 
             'protocolsStats'])
-
         # volume by dex by chain
         volume_by_dex_by_chain = \
             pd.concat([pd.DataFrame(ha.iloc[i]) for i in range(len(ha))])\
             .stack().reset_index()
         volume_by_dex_by_chain.columns = ['protocol', 'chain', 'total24h']
-
         # daily volume of all dexes
         daily_volume = pd.DataFrame(resp['totalDataChart'])
         daily_volume.columns = ['date', 'volume']
-        daily_volume['date'] = pd.to_datetime(
-            daily_volume['date'], unit='s', utc=True)
-        
+        daily_volume['date'] = \
+            pd.to_datetime(daily_volume['date'], unit='s', utc=True).dt.date
+        daily_volume = daily_volume.set_index('date')
         # daily volume by dex
         daily_volume_by_dex = pd.DataFrame(resp['totalDataChartBreakdown'])
         daily_volume_by_dex.columns = ['date', 'dex_vol_dict']
         daily_volume_by_dex['date'] = \
-            pd.to_datetime(daily_volume_by_dex['date'], unit='s', utc=True)
+            pd.to_datetime(daily_volume_by_dex['date'], unit='s', utc=True)\
+                .dt.date
         daily_volume_by_dex = daily_volume_by_dex[['date']]\
             .join(pd.DataFrame(daily_volume_by_dex['dex_vol_dict'].tolist()))
-
+        daily_volume_by_dex = daily_volume_by_dex.set_index('date')
         return {'volume_overall': volume_overall, 
                 'volume_by_dex': volume_by_dex, 
-                'volume_by_dex_by_chain': volume_by_dex_by_chain, 
-                'daily_volume':daily_volume, 
+                'volume_by_dex_by_chain_24h': volume_by_dex_by_chain, 
+                'daily_volume': daily_volume, 
                 'daily_volume_by_dex': daily_volume_by_dex}
+    
+    def _tidy_frame_volume_this_dex(self, resp):
+        """ Convert json resp (dict) of a dex volumes to data frame. """
+        df = pd.DataFrame(resp['totalDataChart'], columns=['sec', 'volume'])
+        df['date'] = pd.to_datetime(df['sec'], unit='s', utc=True).dt.date
+        df = df.drop(columns='sec').set_index('date')
+        return df
+
+    def get_dexes_volumes(self, data_type='dailyVolume'):
+        """Get transaction volumes of all dexes, including 'Dexes', 
+        'Derivatives', and 'Yield' protocols.
+
+        Parameters
+        ----------
+        data_type : string
+            'dailyVolume' or 'totalVolume'. It seems 'totalVolume' isn't 
+            used on DeFiLlama's website. So use 'dailyVolume' for most cases.
         
+        Returns 
+        -------
+        dictionary of data frames: 
+            - volume_overall
+            - volume_by_dex 
+            - volume_by_dex_by_chain_24h
+            - daily_volume
+            - daily_volume_by_dex
+        """
+        dd = dict(excludeTotalDataChart='false',
+                  excludeTotalDataChartBreakdown='false',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', '/overview/dexs', params = param)
+        return self._tidy_frame_volume(resp)
+
+    def get_dexes_volumes_this_chain(self, chain, data_type='dailyVolume'):
+        """Get transaction volumes of all dexes, including 'Dexes', 
+        'Derivatives', and 'Yield' protocols from a particular chain.
+
+        Parameters
+        ----------
+        chain : string
+            Name of blockchain. For example, 'ethereum'. List of all supported 
+            chains can be found in the output of get_dexes_volumes().
+        data_type : string
+            Possible values are 'dailyVolume' or 'totalVolume'. It seems 
+            'totalVolume' isn't used on DeFiLlama's website. So use 
+            'dailyVolume' for most cases.
+        
+        Returns 
+        -------
+        dictionary of data frames: 
+            - volume_overall
+            - volume_by_dex 
+            - volume_by_dex_by_chain_24h
+            - daily_volume
+            - daily_volume_by_dex
+        """
+        dd = dict(excludeTotalDataChart='false',
+                  excludeTotalDataChartBreakdown='false',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', f'/overview/dexs/{chain.lower()}', 
+                         params = param)
+        return self._tidy_frame_volume(resp)
+
+    def get_daily_volumes_this_dex(self, dex, data_type='dailyVolume'):
+        """Get historical daily transaction volumes of a dex.
+
+        Parameters
+        ----------
+        dex : string
+            Name of dex. For example, 'uniswap'.
+        data_type : string
+            Possible values are 'dailyVolume' or 'totalVolume'. It seems 
+            'totalVolume' isn't used on DeFiLlama's website. So use 
+            'dailyVolume' for most cases.
+        
+        Returns 
+        -------
+        data frame 
+        """
+        dd = dict(excludeTotalDataChart='true',
+                  excludeTotalDataChartBreakdown='true',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', f'/summary/dexs/{dex}', params = param)
+        return self._tidy_frame_volume_this_dex(resp)
+
+    def get_options_dexes_volumes(self, data_type='dailyNotionalVolume'):
+        """Get transaction volumes of all options dexes.
+
+        Parameters
+        ----------
+        data_type : string
+            Possible values are 'dailyNotionalVolume', 'dailyPremiumVolume',
+            'totalNotionalVolume', or 'totalPremiumVolume'.
+        
+        Returns 
+        -------
+        dictionary of data frames: 
+            - volume_overall
+            - volume_by_dex 
+            - volume_by_dex_by_chain_24h
+            - daily_volume
+            - daily_volume_by_dex
+        """
+        dd = dict(excludeTotalDataChart='false',
+                  excludeTotalDataChartBreakdown='false',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', '/overview/options', params = param)
+        return self._tidy_frame_volume(resp)
+
+    def get_options_dexes_volumes_this_chain(self, chain, 
+                                             data_type='dailyNotionalVolume'):
+        """Get transaction volumes of all options dexes from a particular chain.
+
+        Parameters
+        ----------
+        chain : string
+            Name of blockchain. For example, 'ethereum'. List of all supported 
+            chains can be found in the output of get_dexes_volumes().
+        data_type : string
+            Possible values are 'dailyNotionalVolume', 'dailyPremiumVolume',
+            'totalNotionalVolume', or 'totalPremiumVolume'.
+        
+        Returns 
+        -------
+        dictionary of data frames: 
+            - volume_overall
+            - volume_by_dex 
+            - volume_by_dex_by_chain_24h
+            - daily_volume
+            - daily_volume_by_dex
+        """
+        dd = dict(excludeTotalDataChart='false',
+                  excludeTotalDataChartBreakdown='false',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', f'/overview/options/{chain.lower()}', 
+                         params = param)
+        return self._tidy_frame_volume(resp)
+
+    def get_daily_volumes_this_options_dex(self, dex, 
+                                           data_type='dailyNotionalVolume'):
+        """Get historical daily transaction volumes of an options dex.
+
+        Parameters
+        ----------
+        dex : string
+            Name of options dex. For example, 'lyra', 'premia'.
+        data_type : string
+            Possible values are 'dailyNotionalVolume', 'dailyPremiumVolume',
+            'totalNotionalVolume', or 'totalPremiumVolume'.
+        
+        Returns 
+        -------
+        data frame 
+        """
+        dd = dict(excludeTotalDataChart='true',
+                  excludeTotalDataChartBreakdown='true',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', f'/summary/options/{dex}', params = param)
+        return self._tidy_frame_volume_this_dex(resp)
+                
     # --- fees and revenue --- #
     
     

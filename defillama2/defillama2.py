@@ -4,12 +4,11 @@ import numpy as np
 import time
 from urllib.parse import urlencode, quote
 
-TVL_BASE_URL = "https://api.llama.fi"
+TVL_BASE_URL = VOLUMES_BASE_URL = FEES_BASE_URL = "https://api.llama.fi"
 COINS_BASE_URL = "https://coins.llama.fi"
 STABLECOINS_BASE_URL = "https://stablecoins.llama.fi"
 YIELDS_BASE_URL = "https://yields.llama.fi"
 ABI_DECODER_BASE_URL = "https://abi-decoder.llama.fi"
-VOLUMES_BASE_URL = "https://api.llama.fi"
 
 class DefiLlama:
     """ 
@@ -46,6 +45,8 @@ class DefiLlama:
             url = YIELDS_BASE_URL + endpoint 
         elif api_name == 'VOLUMES':
             url = VOLUMES_BASE_URL + endpoint
+        elif api_name == 'FEES':
+            url = FEES_BASE_URL + endpoint
         else: 
             url = ABI_DECODER_BASE_URL + endpoint
         return self.session.request('GET', url,params=params,timeout=30).json()
@@ -815,8 +816,9 @@ class DefiLlama:
         Parameters
         ----------
         data_type : string
-            'dailyVolume' or 'totalVolume'. It seems 'totalVolume' isn't 
-            used on DeFiLlama's website. So use 'dailyVolume' for most cases.
+            Possible values are 'dailyVolume' or 'totalVolume'. It seems 
+            'totalVolume' isn't used on DeFiLlama's website. So use 
+            'dailyVolume' for most cases.
         
         Returns 
         -------
@@ -968,5 +970,101 @@ class DefiLlama:
                 
     # --- fees and revenue --- #
     
+    def get_fees(self, data_type='dailyFees'):
+        """Get fees paid to or fees accrued (revenue) by all protocols.
+
+        Parameters
+        ----------
+        data_type : string
+            Possible values are 'dailyFees', 'totalFees', 'dailyRevenue', or 
+            'totalRevenue', where fees are paid by users whereas revenue is 
+            fees accrued to the protocol. So fees != revenue here.
+        
+        Returns 
+        -------
+        dictionary of data frames: 
+            - fees_overall (or revenue_overall)
+            - fees_by_dex (or revenue_by_dex)
+            - fees_by_dex_by_chain_24h (or revenue_by_dex_by_chain_24h)
+            - daily_fees (or daily_revenue)
+            - daily_fees_by_dex (or daily_revenue_by_dex)
+        """
+        dd = dict(excludeTotalDataChart='false',
+                  excludeTotalDataChartBreakdown='false',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('FEES', '/overview/fees', params = param)
+        dd_res = self._tidy_frame_volume(resp)
+        if 'Fees' in data_type:
+            new_keys = [k.replace('volume', 'fees') for k in dd_res.keys()]
+        if 'Revenue' in data_type:
+            new_keys = [k.replace('volume', 'revenue') for k in dd_res.keys()]
+        return dict(zip(new_keys, dd_res.values()))
+    
+    def get_fees_this_chain(self, chain, data_type='dailyFees'):
+        """Get fees paid to or fees accrued (revenue) by all protocols from a 
+        particular chain.
+
+        Parameters
+        ----------
+        chain : string
+            Name of blockchain. For example, 'ethereum'. List of all supported 
+            chains can be found in the output of get_fees().
+        data_type : string
+            Possible values are 'dailyFees', 'totalFees', 'dailyRevenue', or 
+            'totalRevenue', where fees are paid by users whereas revenue is 
+            fees accrued to the protocol. So fees != revenue here.
+        
+        Returns 
+        -------
+        dictionary of data frames: 
+            - fees_overall (or revenue_overall)
+            - fees_by_dex (or revenue_by_dex)
+            - fees_by_dex_by_chain_24h (or revenue_by_dex_by_chain_24h)
+            - daily_fees (or daily_revenue)
+            - daily_fees_by_dex (or daily_revenue_by_dex)
+        """
+        dd = dict(excludeTotalDataChart='false',
+                  excludeTotalDataChartBreakdown='false',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('FEES', f'/overview/fees/{chain.lower()}', params=param)
+        dd_res = self._tidy_frame_volume(resp)
+        if 'Fees' in data_type:
+            new_keys = [k.replace('volume', 'fees') for k in dd_res.keys()]
+        if 'Revenue' in data_type:
+            new_keys = [k.replace('volume', 'revenue') for k in dd_res.keys()]
+        return dict(zip(new_keys, dd_res.values()))
+        
+    def get_daily_fees_this_protocol(self, protocol, data_type='dailyFees'):
+        """Get daily fees (paid by users) or revenue (accrued by the protocol) 
+        of a protocol.
+
+        Parameters
+        ----------
+        protocol : string
+            Name of protocol. For example, 'gmx'.
+        data_type : string
+            Possible values are 'dailyFees', 'totalFees', 'dailyRevenue', or 
+            'totalRevenue', where fees are paid by users whereas revenue is 
+            fees accrued to the protocol. So fees != revenue here.
+        
+        Returns 
+        -------
+        data frame 
+        """
+        dd = dict(excludeTotalDataChart='true',
+                  excludeTotalDataChartBreakdown='true',
+                  dataType=data_type)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('VOLUMES', f'/summary/fees/{protocol}', params = param)
+        df = self._tidy_frame_volume_this_dex(resp)
+        if 'Fees' in data_type:
+            df.columns = df.columns.str.replace('volume', 'fees')
+        if 'Revenue' in data_type:
+            df.columns = df.columns.str.replace('volume', 'revenue')
+        return df
+        
+        
     
     # --- bridges --- #

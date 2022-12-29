@@ -106,3 +106,6 @@ obj.get_pool_hist_apy(pool_id)  # pool_id can be obtained from get_pools_yields(
 - [Get on-chain prices, including exotic tokens](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_coins.ipynb).
 - [Get circulating amount, mcap, prices and other data points for stablecoins](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_stablecoins.ipynb).
 - [Get liquidity pools' yields data](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_yields.ipynb).
+- [Get dexes volumes](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_volumes.ipynb)
+- [Get bridges transaction tokens and volumes](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_bridges.ipynb)
+- [Get protocols fees and revenue](https://github.com/coindataschool/defillama2/blob/main/notebooks/defillama_api_fees_and_revenue.ipynb)

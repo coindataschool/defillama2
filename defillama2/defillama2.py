@@ -83,7 +83,8 @@ class DefiLlama:
         -------
         float
         """
-        return self._get('TVL', f'/tvl/{protocol}')
+        resp = self._get('TVL', f'/tvl/{protocol}')
+        return resp['lastHourlyRecord']
 
     def get_chains_curr_tvl(self):
         """Get current TVL of all chains.
@@ -95,8 +96,7 @@ class DefiLlama:
         resp = self._get('TVL', f'/chains/')
         df = pd.DataFrame(resp).loc[:, ['name', 'tokenSymbol', 'tvl']]
         df = df.rename(columns={'name':'chain', 'tokenSymbol':'token'})
-        df = df.set_index('chain')
-        return df
+        return df.reset_index(drop=True)
 
     def get_defi_hist_tvl(self):
         """Get historical TVL of DeFi on all chains.
@@ -753,9 +753,11 @@ class DefiLlama:
             df['timestamp'],
             format='%Y-%m-%dT%H:%M:%S.%f%z').dt.normalize()
         df = df.drop(columns='timestamp')
-        df['apyReward'] = df.apyReward.astype(float)
-        df['apyBase'] = df.apyBase.astype(float)
-        df = df.groupby('date').mean()
+        # convert numeral strings to float
+        numstr_cols = df.select_dtypes(include=['object']).columns
+        df[numstr_cols] = df[numstr_cols].astype(float)
+        # daily avg
+        df = df.groupby('date').agg('mean')
         return df
 
     # --- volumes --- #

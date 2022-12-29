@@ -9,6 +9,7 @@ COINS_BASE_URL = "https://coins.llama.fi"
 STABLECOINS_BASE_URL = "https://stablecoins.llama.fi"
 YIELDS_BASE_URL = "https://yields.llama.fi"
 ABI_DECODER_BASE_URL = "https://abi-decoder.llama.fi"
+BRIDGES_BASE_URL = "https://bridges.llama.fi"
 
 class DefiLlama:
     """ 
@@ -47,6 +48,8 @@ class DefiLlama:
             url = VOLUMES_BASE_URL + endpoint
         elif api_name == 'FEES':
             url = FEES_BASE_URL + endpoint
+        elif api_name == 'BRIDGES':
+            url = BRIDGES_BASE_URL + endpoint
         else: 
             url = ABI_DECODER_BASE_URL + endpoint
         return self.session.request('GET', url,params=params,timeout=30).json()
@@ -785,14 +788,13 @@ class DefiLlama:
         daily_volume = pd.DataFrame(resp['totalDataChart'])
         daily_volume.columns = ['date', 'volume']
         daily_volume['date'] = \
-            pd.to_datetime(daily_volume['date'], unit='s', utc=True).dt.date
+            pd.to_datetime(daily_volume['date'], unit='s', utc=True)
         daily_volume = daily_volume.set_index('date')
         # daily volume by dex
         daily_volume_by_dex = pd.DataFrame(resp['totalDataChartBreakdown'])
         daily_volume_by_dex.columns = ['date', 'dex_vol_dict']
         daily_volume_by_dex['date'] = \
-            pd.to_datetime(daily_volume_by_dex['date'], unit='s', utc=True)\
-                .dt.date
+            pd.to_datetime(daily_volume_by_dex['date'], unit='s', utc=True)
         daily_volume_by_dex = daily_volume_by_dex[['date']]\
             .join(pd.DataFrame(daily_volume_by_dex['dex_vol_dict'].tolist()))
         daily_volume_by_dex = daily_volume_by_dex.set_index('date')
@@ -805,7 +807,7 @@ class DefiLlama:
     def _tidy_frame_volume_this_dex(self, resp):
         """ Convert json resp (dict) of a dex volumes to data frame. """
         df = pd.DataFrame(resp['totalDataChart'], columns=['sec', 'volume'])
-        df['date'] = pd.to_datetime(df['sec'], unit='s', utc=True).dt.date
+        df['date'] = pd.to_datetime(df['sec'], unit='s', utc=True)
         df = df.drop(columns='sec').set_index('date')
         return df
 
@@ -1065,6 +1067,169 @@ class DefiLlama:
             df.columns = df.columns.str.replace('volume', 'revenue')
         return df
         
-        
-    
     # --- bridges --- #
+    
+    def get_bridges_volumes(self):
+        """Get all bridges along with summaries of recent bridge volumes.
+        
+        Returns 
+        -------
+        data frame 
+        """
+        resp = self._get('BRIDGES', f'/bridges')
+        df = pd.DataFrame(resp['bridges'])\
+            .drop(columns=['name', 'icon', 'chains', 'destinationChain'])
+        df['chainsCnt'] = [len(dd['chains']) for dd in resp['bridges']]
+        return df
+    
+    def get_bridge_volume(self, bridge_id):
+        """Get volume summary of a particular bridge and volume breakdown by chain.
+
+        Parameters
+        ----------
+        bridge_id : int
+            Unique identifier of a bridge. For example, 1 is Polygon PoS. You 
+            can look up all id values in the `id` column returned by calling
+            `get_bridges_volumes()`.
+        
+        Returns 
+        -------
+        dictionary of data frames
+        """
+        resp = self._get('BRIDGES', f'/bridge/{bridge_id}')
+        # bridge volume summary
+        df = pd.DataFrame(resp)
+        cols1 = ['displayName', 'lastHourlyVolume', 'currentDayVolume',
+                'lastDailyVolume', 'dayBeforeLastVolume', 'weeklyVolume',
+                'monthlyVolume']
+        df1 = df[cols1].reset_index(drop=True).drop_duplicates()
+        cols2 = ['lastHourlyTxs', 'currentDayTxs', 'prevDayTxs',
+                'dayBeforeLastTxs', 'weeklyTxs', 'monthlyTxs']
+        df2 = df[cols2].dropna().reset_index(drop=True).drop_duplicates()
+        df_summary = df1.join(df2)
+        
+        # bridge volume summary by chain
+        lst1 = []
+        lst2 = []
+        dd = resp['chainBreakdown']
+        for k in dd.keys():
+            df = pd.DataFrame(dd[k])
+            cols1 = ['lastHourlyVolume', 'currentDayVolume', 'lastDailyVolume',
+                    'dayBeforeLastVolume', 'weeklyVolume', 'monthlyVolume']
+            cols2 = ['lastHourlyTxs', 'currentDayTxs', 'prevDayTxs', 
+                    'dayBeforeLastTxs', 'weeklyTxs', 'monthlyTxs']
+            da1 = df[cols1].reset_index(drop=True).drop_duplicates()    
+            da2 = df[cols2].reset_index(names='txType')
+            # insert a new col 'chain' to the left 
+            da1.insert(0, 'chain', k) 
+            da2.insert(0, 'chain', k)
+            lst1.append(da1)
+            lst2.append(da2)
+        df_summary_by_chain = pd.concat(lst1, ignore_index=True)
+        df_deposits_withdraws_by_chain = pd.concat(lst2, ignore_index=True)
+        return {'summary':df_summary, 
+                'summary_by_chain': df_summary_by_chain, 
+                'deposits_withdraws_by_chain': df_deposits_withdraws_by_chain}
+
+    def get_daily_volume_this_bridge(self, bridge_id, chain='all'):
+        """Get historical volumes for a bridge on a particular chain or on all 
+        chains.
+
+        Parameters
+        ----------
+        bridge_id : int
+            Unique identifier of a bridge. For example, 1 is Polygon PoS. You 
+            can look up all id values in the `id` column returned by calling
+            `get_bridges_volumes()`.
+        chain : str
+            Chain name. For example, 'Ethereum'. Default is 'all' for volume on 
+            all chains.
+        
+        Returns 
+        -------
+        data frame
+        """
+        if chain != 'all':
+            chain = chain.lower().capitalize()
+        resp = self._get('BRIDGES', f'/bridgevolume/{chain}?id={bridge_id}')
+        df = pd.DataFrame(resp)
+        df['date'] = pd.to_datetime(df['date'], unit='s', utc=True)
+        return df.set_index('date')
+
+    def get_24h_token_volume_this_bridge(self, bridge_id, chain, date):
+        """Get 24hr token and volume breakdown for a bridge. 
+
+        Parameters
+        ----------
+        bridge_id : int
+            Unique identifier of a bridge. For example, 1 is Polygon PoS. You 
+            can look up all id values in the `id` column returned by calling
+            `get_bridges_volumes()`.
+        chain : str
+            Chain name. For example, 'Ethereum'.
+        date : str
+            Date string of format '%Y-%m-%d', for example, '2022-12-01'. Data 
+            returned will be for the 24hr period starting at 00:00 UTC on `date`.
+        
+        Returns 
+        -------
+        data frame
+        """
+        unix_sec = pd.to_datetime(date).timestamp()
+        if chain != 'all':
+            chain = chain.lower().capitalize()        
+        resp = self._get('BRIDGES', 
+                         f'/bridgedaystats/{unix_sec}/{chain}?id={bridge_id}') 
+        # part 1
+        df1 = pd.DataFrame(resp['totalTokensDeposited']).T.reset_index(drop=True)
+        df1 = df1[['symbol', 'usdValue']]\
+            .rename(columns={'usdValue':'TokensDeposited_usdValue'})
+        # part 2
+        df2 = pd.DataFrame(resp['totalTokensWithdrawn']).T.reset_index(drop=True)
+        df2 = df2[['symbol', 'usdValue']]\
+            .rename(columns={'usdValue':'TokensWithdrawn_usdValue'})
+        # part 3
+        df3 = pd.DataFrame(resp['totalAddressDeposited']).T.reset_index(drop=True)
+        df3.columns = [f'AddressDeposited_{nm}' for nm in df3.columns]
+        # part 4
+        df4 = pd.DataFrame(resp['totalAddressWithdrawn']).T.reset_index(drop=True)
+        df4.columns = [f'AddressWithdrawn_{nm}' for nm in df4.columns]
+        return pd.merge(df1, df2).join(df3).join(df4)
+
+    def get_tx_this_bridge(self, bridge_id, sourcechain, start, end, 
+                           fromToAddrs_chains, limit=200):
+        """Get all transactions for a bridge from a source chain within a date 
+        range.
+
+        Parameters
+        ----------
+        bridge_id : int
+            Unique identifier of a bridge. For example, 1 is Polygon PoS. You 
+            can look up all id values in the `id` column returned by calling
+            `get_bridges_volumes()`.
+        sourcechain : str
+            Name of the chain bridging from. For example, 'Ethereum'.
+        start : str
+            Start of the date range. Date string of format '%Y-%m-%d', 
+            for example, '2022-12-01'. 
+        end : str
+            End of the date range. Date string of format '%Y-%m-%d', 
+            for example, '2022-12-01'. 
+        fromToAddrs_chains : dict
+            A dictionary with "from" or "to" addresses as keys and chain names 
+            as values. Example chain names are ethereum, bsc, polygon, avax... .
+        limit : int
+            Number of transactions returned, maximum is 6000.
+            
+        Returns 
+        -------
+        data frame
+        """
+        start = pd.to_datetime(start, format='%Y-%m-%d', utc=True).timestamp()
+        end   = pd.to_datetime(end, format='%Y-%m-%d', utc=True).timestamp()
+        ss = ','.join([v + ':' +k for k, v in fromToAddrs_chains.items()])
+        dd = dict(starttimestamp=start, endtimestamp=end,
+                  sourcechain=sourcechain, address=ss, limit=limit)
+        param = urlencode(dd, quote_via=quote)
+        resp = self._get('BRIDGES', f'/transactions/{bridge_id}', params=param) 
+        return pd.DataFrame(resp)

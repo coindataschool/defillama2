@@ -360,10 +360,10 @@ class DefiLlama:
 
         # get unix seconds for each date 
         if kind == 'close':
-            dttms = [dt.replace(hour=23, minute=59, second=59).timestamp() 
+            dttms = [int(dt.replace(hour=23, minute=59, second=59).timestamp()) 
                      for dt in dates]
         elif kind == 'open':
-            dttms = [dt.replace(hour=0, minute=0, second=0).timestamp() 
+            dttms = [int(dt.replace(hour=0, minute=0, second=0).timestamp()) 
                      for dt in dates]
         else: 
             raise Exception("Only 'open' or 'close' are supported.")
@@ -440,7 +440,7 @@ class DefiLlama:
         dttms = pd.date_range(start, end, inclusive='left', freq='60min')
         # convert to unix seconds and 
         # give 4 hours buffer to ensure DeFiLlama data are available
-        dttms = [dttm.timestamp() for dttm in dttms 
+        dttms = [int(dttm.timestamp()) for dttm in dttms 
                  if dttm < now-pd.Timedelta(hours=4)] 
         
         # necessary due to api limit

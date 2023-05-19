@@ -83,8 +83,7 @@ class DefiLlama:
         -------
         float
         """
-        resp = self._get('TVL', f'/tvl/{protocol}')
-        return resp['lastHourlyRecord']
+        return self._get('TVL', f'/tvl/{protocol}')
 
     def get_chains_curr_tvl(self):
         """Get current TVL of all chains.
@@ -149,7 +148,7 @@ class DefiLlama:
         df = pd.DataFrame(self._get('TVL', '/protocols'))
         cols = ['name', 'symbol', 'chain', 'category', 'chains', 
                 'tvl', 'change_1d', 'change_7d', 
-                'fdv', 'mcap', 'forkedFrom']
+                'mcap', 'forkedFrom']
         df = df.loc[:, cols].rename(columns={'forkedFrom':'forked_from'})
         return df
 

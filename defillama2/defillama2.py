@@ -778,8 +778,7 @@ class DefiLlama:
         ha = df['breakdown24h']
         volume_by_dex = df.drop(columns=[
             'latestFetchIsOk', 'disabled', 'module', 'logo', 'protocolType', 
-            'displayName', 'methodology', 'methodologyURL', 'breakdown24h', 
-            'protocolsStats'])
+            'displayName', 'methodology', 'methodologyURL', 'breakdown24h',])
         # volume by dex by chain
         volume_by_dex_by_chain = \
             pd.concat([pd.DataFrame(ha.iloc[i]) for i in range(len(ha))])\
